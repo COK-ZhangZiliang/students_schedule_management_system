@@ -1,8 +1,8 @@
 #include <bits/stdc++.h>
 using namespace std;
-const int N = 127;          // 节点数最大值
-const int INF = 0x3f3f3f3f; // 距离最大值
-typedef pair<int, int> PII; // 存储坐标
+static const int N = 127;          // 节点数最大值
+static const int INF = 0x3f3f3f3f; // 距离最大值
+typedef pair<int, int> PII;        // 存储坐标
 #define x first
 #define y second
 
@@ -30,8 +30,10 @@ struct AdjList
 };
 
 // 需要修改，封装到类中
-bool collison[N] = {0}; // 记录hash是否发生冲突
-path dis[N][N];         // 记录任意两点之间的距离
+static bool collison[N] = {0}; // 记录hash是否发生冲突
+static path dis[N][N];         // 记录任意两点之间的距离
+static int tabu[N][N];         // 禁忌表
+static int tabulen[N][N];      // 禁忌期，最大值为5
 
 // 定义一个类来表示图
 class Graph
@@ -64,12 +66,31 @@ public:
     void dijkstra(string src, string dest);
 
     // 找到最短路径
-    void getPath(int s, int *prev, int *temp_dist);
+    void getPath(unsigned int s, int *prev, int *temp_dist);
 
     // 输出最短路径
-    void printPath(int s, int d);
+    void printPath(unsigned int s, unsigned int d);
 
-    // 需要改为private
+    // 禁忌搜索算法
+    // 禁忌（Tabu Search）算法是一种亚启发式(meta-heuristic)随机搜索算法
+    // 它从一个初始可行解出发，选择一系列的特定搜索方向（移动）作为试探，选择实现让特定的目标函数值变化最多的移动
+    // 为了避免陷入局部最优解，TS搜索中采用了一种灵活的“记忆”技术
+    // 对已经进行的优化过程进行记录和选择，指导下一步的搜索方向，这就是Tabu表的建立
+
+    // 计算路径长度
+    int calcPathLen(const vector<int> &path);
+    // 交换两个位置的值
+    void swapVal(int &a, int &b);
+    // 生成候选解
+    vector<int> generateCandidate(const vector<int> &cur_path);
+    // 判断路径是否在禁忌表中
+    bool isInTabuList(const vector<int> &path);
+    // 更新禁忌表和禁忌期
+    void updateTabuList(const vector<int> &cur_path, const vector<int> &new_path);
+    // 禁忌搜索算法
+    void tabuSearch(string src, vector<string> dst);
+
+    // 需要修改为private
 public:
     AdjList *array;
 };
@@ -221,7 +242,7 @@ unsigned int Graph::BKDRHash(char *str)
     return (hash & 0x7FFFFFFF) % N;
 }
 
-void Graph::printPath(int s, int d)
+void Graph::printPath(unsigned int s, unsigned int d)
 {
     for (int i = 0; i < dis[s][d].cnt - 1; i++)
     {
@@ -248,11 +269,12 @@ void Graph::printPath(int s, int d)
                      << "到达 " << array[dis[s][d].s[i + 1]].place_name << endl;
         }
     }
-    cout << "到达目的地" << endl;
+    cout << "到达目的地 " << array[dis[s][d].s[dis[s][d].cnt - 1]].place_name << endl;
 }
 
-void Graph::getPath(int s, int *prev, int *temp_dist)
+void Graph::getPath(unsigned int s, int *prev, int *temp_dist)
 {
+    // 修改:双向建立最短路径
     for (int i = 0; i < N; i++)
     {
         dis[s][i].dist = temp_dist[i];
@@ -263,6 +285,11 @@ void Graph::getPath(int s, int *prev, int *temp_dist)
             temp = prev[temp];
         }
 
+        // 双向建立最短路径
+        memcpy(dis[i][s].s, dis[s][i].s, sizeof(dis[s][i].s));
+        dis[i][s].dist = dis[s][i].dist;
+        dis[i][s].cnt = dis[s][i].cnt;
+
         // 翻转路径
         reverse(dis[s][i].s, dis[s][i].s + dis[s][i].cnt);
     }
@@ -270,11 +297,11 @@ void Graph::getPath(int s, int *prev, int *temp_dist)
 
 void Graph::dijkstra(string src, string dest)
 {
-    int s = getIndex(src);
-    int d = getIndex(dest);
+    unsigned int s = getIndex(src);
+    unsigned int d = getIndex(dest);
     if (dis[s][d].cnt) // 若已经求得最短路径则直接输出
     {
-        printPath(s, d);
+        // printPath(s, d);
         return;
     }
 
@@ -316,11 +343,140 @@ void Graph::dijkstra(string src, string dest)
 
     // 找出s到其余所有点的最短路径
     getPath(s, prev, temp_dis);
-    printPath(s, d);
+
+    // printPath(s, d);
     return;
 }
 
 Graph::~Graph()
 {
     delete[] array;
+}
+
+int Graph::calcPathLen(const vector<int> &path)
+{
+    int res = 0;
+    for (int i = 0; i < path.size() - 1; i++)
+    {
+        dijkstra(array[path[i]].place_name, array[path[i + 1]].place_name);
+        res += dis[path[i]][path[i + 1]].dist;
+    }
+    res += dis[path[path.size() - 1]][path[0]].dist;
+    return res;
+}
+
+void Graph::swapVal(int &a, int &b)
+{
+    int tmp = a;
+    a = b;
+    b = tmp;
+}
+
+vector<int> Graph::generateCandidate(const vector<int> &cur_path)
+{
+    vector<int> candidate(cur_path);
+    srand(unsigned(time(0))); // 更改随机种子
+    int x = rand() % cur_path.size();
+    int y = rand() % cur_path.size();
+    while (x == y)
+    {
+        y = rand() % cur_path.size();
+    }
+    swapVal(candidate[x], candidate[y]);
+    return candidate;
+}
+
+bool Graph::isInTabuList(const vector<int> &path)
+{
+    for (int i = 1; i < path.size(); i++)
+    {
+        if (tabu[path[i - 1]][path[i]])
+        {
+            return true;
+        }
+    }
+    if (tabu[path[path.size() - 1]][path[0]])
+    {
+        return true;
+    }
+    return false;
+}
+
+void Graph::updateTabuList(const vector<int> &cur_path, const vector<int> &new_path)
+{
+    // tabulen_max=5
+    for (int i = 1; i < cur_path.size(); i++)
+    {
+        tabulen[cur_path[i - 1]][cur_path[i]]--;
+        if (tabulen[cur_path[i - 1]][cur_path[i]] <= 0)
+        {
+            tabu[cur_path[i - 1]][cur_path[i]] = 0;
+        }
+        tabulen[new_path[i - 1]][new_path[i]] = 5;
+        tabu[new_path[i - 1]][new_path[i]] = 1;
+    }
+    tabulen[cur_path[cur_path.size() - 1]][cur_path[0]]--;
+    if (tabulen[cur_path[cur_path.size() - 1]][cur_path[0]] <= 0)
+    {
+        tabu[cur_path[cur_path.size() - 1]][cur_path[0]] = 0;
+    }
+    tabulen[new_path[cur_path.size() - 1]][new_path[0]] = 5;
+    tabu[new_path[cur_path.size() - 1]][new_path[0]] = 1;
+}
+
+void Graph::tabuSearch(string src, vector<string> dst)
+{
+    // 初始化当前解
+    vector<int> cur_path;
+    cur_path.push_back(getIndex(src));
+    for (int i = 0; i < dst.size(); i++)
+    {
+        cur_path.push_back(getIndex(dst[i]));
+    }
+
+    // 随机生成一个新排列
+    srand(unsigned(time(0))); // 更改随机种子
+    random_shuffle(cur_path.begin() + 1, cur_path.end());
+    vector<int> best_path = cur_path;
+
+    // 初始化禁忌表和禁忌期
+    memset(tabu, 0, sizeof(tabu));
+    memset(tabulen, 0, sizeof(tabulen));
+
+    // 设置算法参数
+    int maxiter = 500;
+
+    // 迭代搜索
+    for (int iter = 0; iter < maxiter; iter++)
+    {
+        // 生成候选解并选择其中的一个最优解
+        vector<int> new_path;
+        int cnt = 0;
+        while (cnt < maxiter)
+        {
+            new_path = generateCandidate(cur_path);
+            if (!isInTabuList(new_path))
+            {
+                break;
+            }
+            cnt++;
+        }
+
+        // 更新禁忌表和禁忌期
+        updateTabuList(cur_path, new_path);
+
+        // 更新当前解和最优解
+        cur_path = new_path;
+        if (calcPathLen(cur_path) < calcPathLen(best_path))
+        {
+            best_path = cur_path;
+        }
+    }
+
+    // 输出最优路径
+    for (int i = 0; i < best_path.size() - 1; i++)
+    {
+        printPath(best_path[i], best_path[i + 1]);
+    }
+    printPath(best_path[best_path.size() - 1], best_path[0]);
 }
