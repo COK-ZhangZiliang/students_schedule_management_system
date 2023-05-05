@@ -460,6 +460,9 @@ void Graph::tabuSearch(string src, vector<string> dst)
                 break;
             }
             cnt++;
+
+            // 更新禁忌表和禁忌期
+            updateTabuList(cur_path, new_path);
         }
 
         // 更新禁忌表和禁忌期
