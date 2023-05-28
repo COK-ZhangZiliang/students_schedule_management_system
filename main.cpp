@@ -17,20 +17,22 @@ int main()
     //     }
 
     // dijkstra算法测试
-    gh.dijkstra("路口1", "路口30");
-    gh.printPath(gh.getIndex("路口30"), gh.getIndex("路口1"));
+    // int mode = 0;
+    // gh.dijkstra("路口1", "教三楼北门", mode);
+    // gh.printPath(gh.getIndex("路口1"), gh.getIndex("教三楼北门"), mode);
 
     // tabu算法测试
+    
     int cnt = 0;
     vector<string> dst;
-    for (int i = 0; i < N; i++)
+    for (int i = 120; i < 127; i++)
         if (collison[i] && gh.array[i].place_name != "路口1")
         {
             dst.push_back(gh.array[i].place_name);
             cnt++;
         }
     cout << cnt << endl;
-    gh.tabuSearch("路口1", dst);
+    gh.tabuSearch("路口1", dst, 0);
 
     end = clock();                                                            // 结束时间
     cout << "time = " << double(end - start) / CLOCKS_PER_SEC << "s" << endl; // 输出时间（单位：ｓ）

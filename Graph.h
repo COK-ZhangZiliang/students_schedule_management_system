@@ -9,9 +9,11 @@ typedef pair<int, int> PII;        // 存储坐标
 // 定义一个结构体来存储最短路径相关信息
 struct path
 {
-    int cnt = 0;  // 路径上的节点总数
-    int s[N];     // 路径上的节点编号
-    int dist = 0; // 路径长度
+    int cnt = 0;     // 路径上的节点总数
+    int s[N];        // 路径上的节点编号
+    double dist = 0; // 路径长度
+    int mode;
+    double congest; // 拥塞程度
 };
 
 // 定义一个结构体来表示邻接表中的一个节点
@@ -19,6 +21,8 @@ struct Node
 {
     int dest;
     Node *next;
+    // flag用于标记是否是只可步行的边 =1只可步行 =0即可步行又可以骑车
+    int flag;
 };
 
 // 定义一个结构体来表示邻接表
@@ -31,7 +35,8 @@ struct AdjList
 
 // 需要修改，封装到类中
 static bool collison[N] = {0}; // 记录hash是否发生冲突
-static path dis[N][N];         // 记录任意两点之间的距离
+static path dis1[N][N];        // 记录任意两点之间的距离
+static path dis2[N][N];        // 记录可采用骑车方式的最短距离
 static int tabu[N][N];         // 禁忌表
 static int tabulen[N][N];      // 禁忌期，最大值为5
 
@@ -53,7 +58,7 @@ public:
     unsigned int BKDRHash(char *str);
 
     // 函数用来向图中添加一条边
-    void addEdge(string src, string dest);
+    void addEdge(string src, string dest, int flag);
 
     // 计算地名对应的数组下标值
     unsigned int getIndex(string name);
@@ -63,13 +68,13 @@ public:
 
     // dijkstra算法
     // 时间复杂度O(mlogn)，其中m为边数，n为点数
-    void dijkstra(string src, string dest);
+    void dijkstra(string src, string dest, int mode);
 
     // 找到最短路径
-    void getPath(unsigned int s, int *prev, int *temp_dist);
+    void getPath(unsigned int s, int *prev, int *transportation, int *temp_dist, int mode, double *congestion);
 
     // 输出最短路径
-    void printPath(unsigned int s, unsigned int d);
+    void printPath(unsigned int s, unsigned int d, int mode);
 
     // 禁忌搜索算法
     // 禁忌（Tabu Search）算法是一种亚启发式(meta-heuristic)随机搜索算法
@@ -78,7 +83,7 @@ public:
     // 对已经进行的优化过程进行记录和选择，指导下一步的搜索方向，这就是Tabu表的建立
 
     // 计算路径长度
-    int calcPathLen(const vector<int> &path);
+    int calcPathLen(const vector<int> &path, int mode);
     // 交换两个位置的值
     void swapVal(int &a, int &b);
     // 生成候选解
@@ -88,7 +93,7 @@ public:
     // 更新禁忌表和禁忌期
     void updateTabuList(const vector<int> &cur_path, const vector<int> &new_path);
     // 禁忌搜索算法
-    void tabuSearch(string src, vector<string> dst);
+    void tabuSearch(string src, vector<string> dst, int mode);
 
     // 需要修改为private
 public:
@@ -172,13 +177,20 @@ Graph::Graph()
             int loc2 = line.find('~');
             int loc3 = line.find(' ', loc1 + 1);
 
+            int flag;
+            // 处理只可以步行的边
+            if (line.find("only") != string::npos)
+                flag = 1;
+            else
+                flag = 0;
+
             // 读取src地名
             string name1 = line.substr(0, loc1);
             // 读取dest地名
             string name2 = line.substr(loc2 + 1, loc3 - loc2 - 1);
 
             // 添加一条边
-            addEdge(name1, name2);
+            addEdge(name1, name2, flag);
         }
         file.close();
     }
@@ -198,7 +210,7 @@ unsigned int Graph::getIndex(string name)
     return index;
 }
 
-void Graph::addEdge(string src, string dest)
+void Graph::addEdge(string src, string dest, int flag)
 {
     // 计算src对应的下标
     int index1 = getIndex(src);
@@ -206,7 +218,7 @@ void Graph::addEdge(string src, string dest)
     int index2 = getIndex(dest);
 
     //  添加一条src到dest的边
-    Node *newNode = new Node{index2, nullptr};
+    Node *newNode = new Node{index2, nullptr, flag};
     newNode->next = array[index1].head;
     array[index1].head = newNode;
 }
@@ -242,64 +254,191 @@ unsigned int Graph::BKDRHash(char *str)
     return (hash & 0x7FFFFFFF) % N;
 }
 
-void Graph::printPath(unsigned int s, unsigned int d)
+void Graph::printPath(unsigned int s, unsigned int d, int mode)
 {
-    for (int i = 0; i < dis[s][d].cnt - 1; i++)
+    if (mode == 0)
     {
-        // x方向上的距离
-        int xd = array[dis[s][d].s[i + 1]].loc.x - array[dis[s][d].s[i]].loc.x;
-        // y方向上的距离
-        int yd = array[dis[s][d].s[i + 1]].loc.y - array[dis[s][d].s[i]].loc.y;
-        if (xd != 0)
+        cout << "交通方式：步行" << endl;
+        for (int i = 0, j = 1; i < dis1[s][d].cnt - 1; i = j - 1)
         {
-            if (xd > 0)
-                cout << "从 " << array[dis[s][d].s[i]].place_name << " 向南走 " << xd << "米 "
-                     << "到达 " << array[dis[s][d].s[i + 1]].place_name << endl;
+            int xd = 0, yd = 0;
+            while (j <= dis1[s][d].cnt - 1)
+            {
+                // x方向上的距离
+                xd += array[dis1[s][d].s[j]].loc.x - array[dis1[s][d].s[j - 1]].loc.x;
+                // y方向上的距离
+                yd += array[dis1[s][d].s[j]].loc.y - array[dis1[s][d].s[j - 1]].loc.y;
+                if (xd != 0 && yd != 0)
+                {
+                    xd -= array[dis1[s][d].s[j]].loc.x - array[dis1[s][d].s[j - 1]].loc.x;
+                    yd -= array[dis1[s][d].s[j]].loc.y - array[dis1[s][d].s[j - 1]].loc.y;
+                    break;
+                }
+                j++;
+            }
+            if (xd != 0)
+            {
+                if (xd > 0)
+                    cout << "从 " << array[dis1[s][d].s[i]].place_name << " 向南走 " << xd << "米 "
+                         << "到达 " << array[dis1[s][d].s[j - 1]].place_name << endl;
+                else
+                    cout << "从 " << array[dis1[s][d].s[i]].place_name << " 向北走 " << -xd << "米 "
+                         << "到达 " << array[dis1[s][d].s[j - 1]].place_name << endl;
+            }
             else
-                cout << "从 " << array[dis[s][d].s[i]].place_name << " 向北走 " << -xd << "米 "
-                     << "到达 " << array[dis[s][d].s[i + 1]].place_name << endl;
+            {
+                if (yd > 0)
+                    cout << "从 " << array[dis1[s][d].s[i]].place_name << " 向东走 " << yd << "米 "
+                         << "到达 " << array[dis1[s][d].s[j - 1]].place_name << endl;
+                else
+                    cout << "从 " << array[dis1[s][d].s[i]].place_name << " 向西走 " << -yd << " 米 "
+                         << "到达 " << array[dis1[s][d].s[j - 1]].place_name << endl;
+            }
         }
-        else
-        {
-            if (yd > 0)
-                cout << "从 " << array[dis[s][d].s[i]].place_name << " 向东走 " << yd << "米 "
-                     << "到达 " << array[dis[s][d].s[i + 1]].place_name << endl;
-            else
-                cout << "从 " << array[dis[s][d].s[i]].place_name << " 向西走 " << -yd << " 米 "
-                     << "到达 " << array[dis[s][d].s[i + 1]].place_name << endl;
-        }
+        cout << "到达目的地" << array[dis1[s][d].s[dis1[s][d].cnt - 1]].place_name << endl;
     }
-    cout << "到达目的地 " << array[dis[s][d].s[dis[s][d].cnt - 1]].place_name << endl;
+    else
+    {
+        cout << "交通方式：步行+自行车" << endl;
+        for (int i = 0; i < dis2[s][d].cnt - 1; i++)
+        {
+            // x方向上的距离
+            int xd = array[dis2[s][d].s[i + 1]].loc.x - array[dis2[s][d].s[i]].loc.x;
+            // y方向上的距离
+            int yd = array[dis2[s][d].s[i + 1]].loc.y - array[dis2[s][d].s[i]].loc.y;
+            if (xd != 0)
+            {
+                if (dis2[s][dis2[s][d].s[i + 1]].mode == 0)
+                {
+                    if (xd > 0)
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向南走 " << xd << "米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                    else
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向北走 " << -xd << "米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                }
+                else
+                {
+                    if (xd > 0)
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向南骑自行车 " << xd << "米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                    else
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向北骑自行车 " << -xd << "米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                }
+            }
+            else
+            {
+                if (dis2[s][dis2[s][d].s[i + 1]].mode == 0)
+                {
+                    if (yd > 0)
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向东走 " << yd << "米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                    else
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向西走 " << -yd << " 米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                }
+                else
+                {
+                    if (yd > 0)
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向东骑自行车 " << yd << "米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                    else
+                    {
+                        cout << "从 " << array[dis2[s][d].s[i]].place_name << " 向西骑自行车 " << -yd << " 米 "
+                             << "到达 " << array[dis2[s][d].s[i + 1]].place_name << endl;
+                        cout << "拥塞程度为：" << dis2[s][dis2[s][d].s[i + 1]].congest << endl;
+                    }
+                }
+            }
+        }
+        cout << "到达目的地" << array[dis2[s][d].s[dis2[s][d].cnt - 1]].place_name << endl;
+    }
 }
 
-void Graph::getPath(unsigned int s, int *prev, int *temp_dist)
+void Graph::getPath(unsigned int s, int *prev, int *transportation, int *temp_dist, int mode, double *congestion)
 {
     // 修改:双向建立最短路径
-    for (int i = 0; i < N; i++)
+    if (mode == 0)
     {
-        dis[s][i].dist = temp_dist[i];
-        int temp = i;
-        while (temp != -1)
+        for (int i = 0; i < N; i++)
         {
-            dis[s][i].s[dis[s][i].cnt++] = temp;
-            temp = prev[temp];
+            if (dis1[s][i].cnt) // 已经求出最短路径无需再求
+                continue;
+            dis1[s][i].dist = temp_dist[i];
+            int temp = i;
+            dis1[s][i].mode = transportation[i];
+            dis1[i][s].mode = transportation[i];
+            while (temp != -1)
+            {
+                dis1[s][i].s[dis1[s][i].cnt++] = temp;
+                temp = prev[temp];
+            }
+
+            // 双向建立最短路径
+            memcpy(dis1[i][s].s, dis1[s][i].s, sizeof(dis1[s][i].s));
+            dis1[i][s].dist = dis1[s][i].dist;
+            dis1[i][s].cnt = dis1[s][i].cnt;
+
+            // 翻转路径
+            reverse(dis1[s][i].s, dis1[s][i].s + dis1[s][i].cnt);
         }
+    }
+    else
+    {
+        for (int i = 0; i < N; i++)
+        {
+            if (dis2[s][i].cnt) // 已经求出最短路径无需再求
+                continue;
+            dis2[s][i].dist = temp_dist[i];
+            dis2[s][i].mode = transportation[i];
+            dis2[i][s].mode = transportation[i];
+            dis2[s][i].congest = congestion[i];
+            dis2[i][s].congest = congestion[i];
+            int temp = i;
+            while (temp != -1)
+            {
+                dis2[s][i].s[dis2[s][i].cnt++] = temp;
+                temp = prev[temp];
+            }
 
-        // 双向建立最短路径
-        memcpy(dis[i][s].s, dis[s][i].s, sizeof(dis[s][i].s));
-        dis[i][s].dist = dis[s][i].dist;
-        dis[i][s].cnt = dis[s][i].cnt;
+            // 双向建立最短路径
+            memcpy(dis2[i][s].s, dis2[s][i].s, sizeof(dis2[s][i].s));
+            dis2[i][s].dist = dis2[s][i].dist;
+            dis2[i][s].cnt = dis2[s][i].cnt;
 
-        // 翻转路径
-        reverse(dis[s][i].s, dis[s][i].s + dis[s][i].cnt);
+            // 翻转路径
+            reverse(dis2[s][i].s, dis2[s][i].s + dis2[s][i].cnt);
+        }
     }
 }
 
-void Graph::dijkstra(string src, string dest)
+void Graph::dijkstra(string src, string dest, int mode)
 {
     unsigned int s = getIndex(src);
     unsigned int d = getIndex(dest);
-    if (dis[s][d].cnt) // 若已经求得最短路径则直接输出
+    if ((mode == 0 && dis1[s][d].cnt) || (mode == 1 && dis2[s][d].cnt)) // 若已经求得最短路径则直接输出
     {
         // printPath(s, d);
         return;
@@ -316,8 +455,12 @@ void Graph::dijkstra(string src, string dest)
     int visit[N];                    // 记录是否已经找到到i的最短距离
     memset(visit, 0, sizeof(visit)); // 初始化为没有找到
 
-    int prev[N];                    // 记录最短路径的前驱节点
+    int prev[N];                    // 记录最短路径的前驱节点,
+    int transportation[N];          // 交通方式
+    double congestion[N];           // 拥塞程度
     memset(prev, -1, sizeof(prev)); // 每个节点的前驱节点初始化为-1
+    memset(transportation, 0, sizeof(transportation));
+    memset(congestion, 0, sizeof(congestion));
 
     while (!pq.empty())
     {
@@ -326,15 +469,39 @@ void Graph::dijkstra(string src, string dest)
         visit[u] = 1;
         pq.pop();
         Node *temp = array[u].head;
+        default_random_engine e;
+        uniform_int_distribution<int> d(0, 500);
+        e.seed(time(0));
+
         while (temp != nullptr)
         {
             //  枚举所有出边
-            int v = temp->dest, w = abs(array[u].loc.x - array[v].loc.x) + abs(array[u].loc.y - array[v].loc.y);
+            int v = temp->dest;
+            double w = abs(array[u].loc.x - array[v].loc.x) + abs(array[u].loc.y - array[v].loc.y);
+
+            int is_take_bicycle = 0; // 是否采用骑自行车的方式
+
+            // 随机产生一个0-5.0的浮点数
+            int cgs = d(e);
+            double congst = cgs / 100.0; // 随机产生的道路拥塞量
+
+            if (mode == 1 && temp->flag == 0)
+            {
+                if (w / 3 * congst < w)
+                {
+                    w = w / 3 * congst;
+                    is_take_bicycle = 1;
+                }
+            }
+
             if (!visit[v] && temp_dis[v] > temp_dis[u] + w)
             {
                 // 松弛操作
                 temp_dis[v] = temp_dis[u] + w;
                 prev[v] = u;
+                transportation[v] = is_take_bicycle;
+                congestion[v] = congst;
+
                 pq.push(make_pair(temp_dis[v], v));
             }
             temp = temp->next;
@@ -342,7 +509,7 @@ void Graph::dijkstra(string src, string dest)
     }
 
     // 找出s到其余所有点的最短路径
-    getPath(s, prev, temp_dis);
+    getPath(s, prev, transportation, temp_dis, mode, congestion);
 
     // printPath(s, d);
     return;
@@ -353,15 +520,31 @@ Graph::~Graph()
     delete[] array;
 }
 
-int Graph::calcPathLen(const vector<int> &path)
+int Graph::calcPathLen(const vector<int> &path, int mode)
 {
     int res = 0;
-    for (int i = 0; i < path.size() - 1; i++)
+    if (mode == 0)
     {
-        dijkstra(array[path[i]].place_name, array[path[i + 1]].place_name);
-        res += dis[path[i]][path[i + 1]].dist;
+        for (int i = 0; i < path.size() - 1; i++)
+        {
+            dijkstra(array[path[i]].place_name, array[path[i + 1]].place_name, mode);
+            res += dis1[path[i]][path[i + 1]].dist;
+        }
+
+        dijkstra(array[path[path.size() - 1]].place_name, array[path[0]].place_name, mode);
+        res += dis1[path[path.size() - 1]][path[0]].dist;
     }
-    res += dis[path[path.size() - 1]][path[0]].dist;
+    else
+    {
+        for (int i = 0; i < path.size() - 1; i++)
+        {
+            dijkstra(array[path[i]].place_name, array[path[i + 1]].place_name, mode);
+            res += dis2[path[i]][path[i + 1]].dist;
+        }
+
+        dijkstra(array[path[path.size() - 1]].place_name, array[path[0]].place_name, mode);
+        res += dis2[path[path.size() - 1]][path[0]].dist;
+    }
     return res;
 }
 
@@ -375,12 +558,18 @@ void Graph::swapVal(int &a, int &b)
 vector<int> Graph::generateCandidate(const vector<int> &cur_path)
 {
     vector<int> candidate(cur_path);
-    srand(unsigned(time(0))); // 更改随机种子
+    // srand(unsigned(time(0))); // 更改随机种子
     int x = rand() % cur_path.size();
     int y = rand() % cur_path.size();
+    if (x == 0)
+        x++;
+    if (y == 0)
+        y++;
     while (x == y)
     {
         y = rand() % cur_path.size();
+        if (y == 0)
+            y++;
     }
     swapVal(candidate[x], candidate[y]);
     return candidate;
@@ -424,7 +613,7 @@ void Graph::updateTabuList(const vector<int> &cur_path, const vector<int> &new_p
     tabu[new_path[cur_path.size() - 1]][new_path[0]] = 1;
 }
 
-void Graph::tabuSearch(string src, vector<string> dst)
+void Graph::tabuSearch(string src, vector<string> dst, int mode)
 {
     // 初始化当前解
     vector<int> cur_path;
@@ -435,7 +624,7 @@ void Graph::tabuSearch(string src, vector<string> dst)
     }
 
     // 随机生成一个新排列
-    srand(unsigned(time(0))); // 更改随机种子
+    // srand(unsigned(time(0))); // 更改随机种子
     random_shuffle(cur_path.begin() + 1, cur_path.end());
     vector<int> best_path = cur_path;
 
@@ -470,16 +659,25 @@ void Graph::tabuSearch(string src, vector<string> dst)
 
         // 更新当前解和最优解
         cur_path = new_path;
-        if (calcPathLen(cur_path) < calcPathLen(best_path))
+        if (calcPathLen(cur_path, mode) < calcPathLen(best_path, mode))
         {
             best_path = cur_path;
         }
     }
 
     // 输出最优路径
+    for (int i = 0; i < best_path.size(); i++)
+    {
+        cout << array[best_path[i]].place_name << endl;
+    }
+
     for (int i = 0; i < best_path.size() - 1; i++)
     {
-        printPath(best_path[i], best_path[i + 1]);
+        cout << array[best_path[i]].place_name << endl;
+        // dijkstra(array[best_path[i]].place_name, array[best_path[i + 1]].place_name);
+        printPath(best_path[i], best_path[i + 1], mode);
     }
-    printPath(best_path[best_path.size() - 1], best_path[0]);
+
+    // cout << array[best_path[best_path.size() - 1]].place_name << " " << array[best_path[0]].place_name << endl;
+    printPath(best_path[best_path.size() - 1], best_path[0], mode);
 }
